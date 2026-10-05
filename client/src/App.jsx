@@ -1,28 +1,55 @@
-import VideoPlayer from "./components/VideoPlayer/VideoPlayer";
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
+import Home from "./pages/Home";
+import MainApp from "./pages/MainApp";
+
+function Navigation() {
+  const location = useLocation();
+  const isApp = location.pathname === "/app";
+
+  return (
+    <header className="border-b border-slate-800/60 bg-[#0a0a0a]">
+      <div className="mx-auto max-w-screen-2xl px-6 py-4 flex items-center justify-between">
+        <Link to="/" className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded bg-slate-100 flex items-center justify-center">
+            <span className="text-slate-900 font-bold text-xs">C</span>
+          </div>
+          <span className="text-slate-200 font-semibold tracking-tight text-sm hover:text-white transition-colors">
+            Confusion Learning
+          </span>
+        </Link>
+        
+        <nav className="flex items-center gap-6">
+          <Link 
+            to="/" 
+            className={`text-sm font-medium transition-colors ${!isApp ? 'text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            Home
+          </Link>
+          <Link 
+            to="/app" 
+            className={`text-sm font-medium transition-colors ${isApp ? 'text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            Workspace
+          </Link>
+        </nav>
+      </div>
+    </header>
+  );
+}
 
 function App() {
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-
-      <header className="border-b border-slate-800">
-        <div className="mx-auto max-w-6xl px-6 py-5">
-          <h1 className="text-xl font-bold">
-            Confusion Learning System
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-400">
-            Real-time confusion signalling for video-based learning
-          </p>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-6 py-10">
-
-        <VideoPlayer />
-
-      </main>
-
-    </div>
+    <Router>
+      <div className="min-h-screen bg-[#0a0a0a] text-slate-300 flex flex-col font-sans selection:bg-slate-700 selection:text-white">
+        <Navigation />
+        <main className="flex-1 mx-auto max-w-screen-2xl w-full px-6 py-6">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/app" element={<MainApp />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
   );
 }
 

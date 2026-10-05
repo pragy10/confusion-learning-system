@@ -1,107 +1,244 @@
-import { useCallback, useRef, useState } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+} from "react";
+
 import {
   TELEMETRY_EVENTS,
-  CONFUSION_TYPES,
   createTelemetryEvent,
 } from "../utils/telemetry";
 
-export function useVideoTelemetry() {
+import {
+  saveTelemetryEvent,
+} from "../services/eventService";
+
+
+export function useVideoTelemetry(sessionId) {
+
   const [events, setEvents] = useState([]);
-  const previousTimeRef = useRef(0);
-  const previousRateRef = useRef(1);
 
-  const recordEvent = useCallback((type, data = {}) => {
-    const event = createTelemetryEvent(type, data);
+  const previousTimeRef =
+    useRef(0);
 
-    setEvents((previousEvents) => [
-      ...previousEvents,
-      event,
-    ]);
+  const previousRateRef =
+    useRef(1);
 
-    console.log("[TELEMETRY]", event);
 
-    return event;
-  }, []);
+  const recordEvent = useCallback(
+    (type, data = {}) => {
 
-  const recordPlay = useCallback((videoTime) => {
-    return recordEvent(TELEMETRY_EVENTS.PLAY, {
-      videoTime,
-    });
-  }, [recordEvent]);
+      const event =
+        createTelemetryEvent(
+          type,
+          data
+        );
 
-  const recordPause = useCallback((videoTime) => {
-    return recordEvent(TELEMETRY_EVENTS.PAUSE, {
-      videoTime,
-    });
-  }, [recordEvent]);
 
-  const recordSeek = useCallback((from, to) => {
-    const difference = to - from;
+      setEvents(
+        (previousEvents) => [
+          ...previousEvents,
+          event,
+        ]
+      );
 
-    let type = TELEMETRY_EVENTS.SEEK;
 
-    if (difference <= -2) {
-      type = TELEMETRY_EVENTS.REWIND;
-    } else if (difference >= 2) {
-      type = TELEMETRY_EVENTS.FORWARD;
-    }
+      console.log(
+        "[TELEMETRY]",
+        event
+      );
 
-    previousTimeRef.current = to;
 
-    return recordEvent(type, {
-      from,
-      to,
-      distance: Math.abs(difference),
-    });
-  }, [recordEvent]);
+      /*
+       * Save the event to MongoDB.
+       */
+      if (sessionId) {
 
-  const recordSpeedChange = useCallback((videoTime, newRate) => {
-    const previousRate = previousRateRef.current;
+        saveTelemetryEvent(
+          event,
+          sessionId
+        );
 
-    previousRateRef.current = newRate;
+      }
 
-    return recordEvent(TELEMETRY_EVENTS.SPEED_CHANGE, {
-      videoTime,
-      previousRate,
-      newRate,
-    });
-  }, [recordEvent]);
 
-  const recordConfusionSignal = useCallback(
-    (videoTime, confusionType) => {
-        return recordEvent(TELEMETRY_EVENTS.CONFUSION_SIGNAL, {
-        videoTime,
-        confusionType,
-        });
+      return event;
+
     },
-    [recordEvent]
-    );
+    [sessionId]
+  );
 
-  const updateCurrentTime = useCallback((currentTime) => {
-    previousTimeRef.current = currentTime;
-  }, []);
 
-  const recordExplanationRequest = useCallback(
-    (videoTime, reason) => {
+  const recordPlay = useCallback(
+    (videoTime) => {
+
       return recordEvent(
-        TELEMETRY_EVENTS.AUTO_CONFUSION_EXPLANATION_REQUEST,
+        TELEMETRY_EVENTS.PLAY,
         {
           videoTime,
-          reason,
         }
       );
+
     },
     [recordEvent]
   );
 
+
+  const recordPause = useCallback(
+    (videoTime) => {
+
+      return recordEvent(
+        TELEMETRY_EVENTS.PAUSE,
+        {
+          videoTime,
+        }
+      );
+
+    },
+    [recordEvent]
+  );
+
+
+  const recordSeek = useCallback(
+    (from, to) => {
+
+      const difference =
+        to - from;
+
+
+      let type =
+        TELEMETRY_EVENTS.SEEK;
+
+
+      if (difference <= -2) {
+
+        type =
+          TELEMETRY_EVENTS.REWIND;
+
+      } else if (difference >= 2) {
+
+        type =
+          TELEMETRY_EVENTS.FORWARD;
+
+      }
+
+
+      previousTimeRef.current =
+        to;
+
+
+      return recordEvent(
+        type,
+        {
+          from,
+          to,
+          distance:
+            Math.abs(difference),
+          videoTime: to,
+        }
+      );
+
+    },
+    [recordEvent]
+  );
+
+
+  const recordSpeedChange =
+    useCallback(
+      (videoTime, newRate) => {
+
+        const previousRate =
+          previousRateRef.current;
+
+
+        previousRateRef.current =
+          newRate;
+
+
+        return recordEvent(
+          TELEMETRY_EVENTS.SPEED_CHANGE,
+          {
+            videoTime,
+            previousRate,
+            newRate,
+          }
+        );
+
+      },
+      [recordEvent]
+    );
+
+
+  const recordConfusionSignal =
+    useCallback(
+      (
+        videoTime,
+        confusionType
+      ) => {
+
+        return recordEvent(
+          TELEMETRY_EVENTS.CONFUSION_SIGNAL,
+          {
+            videoTime,
+            confusionType,
+          }
+        );
+
+      },
+      [recordEvent]
+    );
+
+
+  const updateCurrentTime =
+    useCallback(
+      (currentTime) => {
+
+        previousTimeRef.current =
+          currentTime;
+
+      },
+      []
+    );
+
+
+  const recordExplanationRequest =
+    useCallback(
+      (
+        videoTime,
+        reason
+      ) => {
+
+        return recordEvent(
+          TELEMETRY_EVENTS.AUTO_CONFUSION_EXPLANATION_REQUEST,
+          {
+            videoTime,
+            reason,
+          }
+        );
+
+      },
+      [recordEvent]
+    );
+
+
   return {
+
     events,
+
     recordPlay,
+
     recordPause,
+
     recordSeek,
+
     recordSpeedChange,
+
     recordConfusionSignal,
+
     recordExplanationRequest,
+
     updateCurrentTime,
+
   };
+
 }

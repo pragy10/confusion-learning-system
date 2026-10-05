@@ -29,15 +29,15 @@ const confusionOptions = [
 
 function RadialMenu({ onSelect, onClose }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60">
       <div className="relative h-80 w-80">
         {confusionOptions.map((option) => (
           <button
             key={option.type}
             onClick={() => onSelect(option.type)}
-            className={`absolute ${option.position} group flex h-24 w-24 flex-col items-center justify-center rounded-full border border-cyan-400/40 bg-slate-900 text-center shadow-lg transition duration-200 hover:scale-110 hover:border-cyan-300 hover:bg-slate-800`}
+            className={`absolute ${option.position} group flex h-24 w-24 flex-col items-center justify-center rounded-full border border-slate-700 bg-[#111] text-center shadow-lg transition duration-200 hover:scale-105 hover:border-slate-500 hover:bg-slate-800`}
           >
-            <span className="text-sm font-semibold text-white">
+            <span className="text-sm font-semibold text-slate-200">
               {option.label}
             </span>
 
@@ -49,7 +49,7 @@ function RadialMenu({ onSelect, onClose }) {
 
         <button
           onClick={onClose}
-          className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-600 bg-slate-950 text-sm font-semibold text-slate-300 transition hover:bg-slate-800"
+          className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-800/60 bg-[#0a0a0a] text-sm font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
         >
           Cancel
         </button>

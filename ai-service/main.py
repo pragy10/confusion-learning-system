@@ -24,6 +24,7 @@ app.add_middleware(
 class ExplanationRequest(BaseModel):
     transcript_context: str
     confusion_type: str
+    depth: str = "STANDARD"
     
     
 @app.post("/explain")
@@ -32,15 +33,23 @@ def explain(request: ExplanationRequest):
         result = generate_explanation(
             transcript_context=request.transcript_context,
             confusion_type=request.confusion_type,
+            depth=request.depth,
         )
-
         return result
-
     except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+        raise HTTPException(status_code=500, detail=str(error))
+
+class NotesRequest(BaseModel):
+    transcript: list
+
+@app.post("/notes")
+def generate_notes_endpoint(request: NotesRequest):
+    try:
+        from llm_explanation import generate_notes
+        result = generate_notes(request.transcript)
+        return result
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 @app.get("/health")
 def health_check():
