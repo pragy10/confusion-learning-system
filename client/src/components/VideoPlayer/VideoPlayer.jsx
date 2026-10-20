@@ -91,6 +91,7 @@ function VideoPlayer({
   const [explanationDepth, setExplanationDepth] = useState("STANDARD");
 
   const [activeTab, setActiveTab] = useState("transcript");
+  const [transcriptViewMode, setTranscriptViewMode] = useState("current");
 
   /*
    * Peer confusion heatmap data.
@@ -313,8 +314,10 @@ function VideoPlayer({
           }
           const data = await res.json();
           if (!cancelled) {
-            setTranscript(data.segments || []);
+            const segs = data.segments || [];
+            setTranscript(segs);
             setTranscriptStatus("ready");
+            setTranscriptContext(getTranscriptContext(segs, 0));
           }
           return;
         }
@@ -330,8 +333,10 @@ function VideoPlayer({
         const result = await transcribeVideo(fileToTranscribe);
 
         if (!cancelled) {
-          setTranscript(result?.segments || []);
+          const segs = result?.segments || [];
+          setTranscript(segs);
           setTranscriptStatus("ready");
+          setTranscriptContext(getTranscriptContext(segs, 0));
         }
       } catch (error) {
         console.error("[TRANSCRIPT ERROR]", error);
@@ -1121,10 +1126,39 @@ function VideoPlayer({
               {activeTab === "transcript" && (
                 <div>
                   <div className="mb-3 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-white">Video Transcript</h2>
-                    <span className="text-xs text-slate-400 font-mono">
-                      {transcript ? `${transcript.length} segments` : "0 segments"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-semibold text-white">Live Transcript</h2>
+                      <span className="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-mono text-emerald-400">
+                        {formatSeconds(currentTime)}
+                      </span>
+                    </div>
+
+                    {transcript && transcript.length > 0 && (
+                      <div className="flex items-center rounded-lg bg-[#0a0a0a] p-0.5 border border-slate-800 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setTranscriptViewMode("current")}
+                          className={`px-2 py-0.5 rounded font-medium transition ${
+                            transcriptViewMode === "current"
+                              ? "bg-slate-700 text-white"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          Timestamp
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTranscriptViewMode("all")}
+                          className={`px-2 py-0.5 rounded font-medium transition ${
+                            transcriptViewMode === "all"
+                              ? "bg-slate-700 text-white"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          All ({transcript.length})
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {transcriptLoading ? (
@@ -1134,6 +1168,57 @@ function VideoPlayer({
                     </div>
                   ) : transcriptError ? (
                     <p className="text-sm text-red-400">Transcript error: {transcriptError}</p>
+                  ) : transcriptViewMode === "current" ? (
+                    transcriptContext?.current ? (
+                      <div className="space-y-3">
+                        {/* Previous line context */}
+                        {transcriptContext.previous.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Previous</span>
+                            {transcriptContext.previous.map((seg) => (
+                              <p
+                                key={seg.id}
+                                onClick={() => handleSeek(seg.start)}
+                                className="cursor-pointer rounded-lg bg-slate-800/40 border border-slate-800/60 p-2.5 text-xs text-slate-400 hover:text-slate-300 transition"
+                              >
+                                <span className="font-mono text-[10px] text-slate-500 mr-2">[{formatSeconds(seg.start)}]</span>
+                                {seg.text}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Current timestamp line */}
+                        <div className="rounded-xl border border-slate-600 bg-slate-800/80 p-4 shadow-sm ring-1 ring-slate-500/20">
+                          <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-2">
+                            <span className="text-emerald-400 font-sans font-semibold flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              Current line [{formatSeconds(transcriptContext.current.start)} - {formatSeconds(transcriptContext.current.end)}]
+                            </span>
+                          </div>
+                          <p className="text-sm leading-relaxed font-medium text-white">{transcriptContext.current.text}</p>
+                        </div>
+
+                        {/* Next line context */}
+                        {transcriptContext.next.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Coming Up</span>
+                            {transcriptContext.next.map((seg) => (
+                              <p
+                                key={seg.id}
+                                onClick={() => handleSeek(seg.start)}
+                                className="cursor-pointer rounded-lg bg-slate-800/40 border border-slate-800/60 p-2.5 text-xs text-slate-400 hover:text-slate-300 transition"
+                              >
+                                <span className="font-mono text-[10px] text-slate-500 mr-2">[{formatSeconds(seg.start)}]</span>
+                                {seg.text}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">No transcript line for this timestamp.</p>
+                    )
                   ) : transcript && transcript.length > 0 ? (
                     <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
                       {transcript.map((seg) => {
