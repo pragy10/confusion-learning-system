@@ -14,6 +14,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     service: "backend",
+    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
   });
 });
 
@@ -22,24 +23,20 @@ app.use("/api/events", eventsRouter);
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI);
-
-    console.log("MongoDB connected.");
-
-    app.listen(PORT, () => {
-      console.log(
-        `Backend running on http://localhost:${PORT}`
-      );
-    });
-  } catch (error) {
-    console.error(
-      "MongoDB connection failed:",
-      error
-    );
-
-    process.exit(1);
+  if (process.env.MONGODB_URI) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log("MongoDB connected.");
+    } catch (error) {
+      console.warn("MongoDB connection failed (running in fallback mode):", error.message);
+    }
+  } else {
+    console.warn("MONGODB_URI is not set. Events persistence disabled.");
   }
+
+  app.listen(PORT, () => {
+    console.log(`Backend running on port ${PORT}`);
+  });
 }
 
 startServer();
