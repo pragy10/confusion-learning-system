@@ -965,6 +965,31 @@ Planned:
 
 # 23. Starting the Entire Project
 
+### One-Click Startup (Recommended)
+
+From the project root (D:\hci), simply double-click start.bat or run:
+
+`cmd
+start.bat
+`
+
+Or using PowerShell:
+
+`powershell
+.\start.ps1
+`
+
+This automatically opens 3 dedicated windows for:
+1. **Node/Express Backend Server** (http://localhost:5000)
+2. **FastAPI AI Microservice** with .venv active (http://localhost:8000)
+3. **React Vite Client** (http://localhost:5173)
+
+To stop all services and free the ports, run stop.bat.
+
+---
+
+### Manual Multi-Terminal Startup (Alternative)
+
 The project uses multiple services.
 
 Open separate VS Code terminals.

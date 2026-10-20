@@ -1,4 +1,4 @@
-const BACKEND_URL = "http://localhost:5000";
+import { BACKEND_URL } from "../config/api";
 
 export async function saveTelemetryEvent(
   event,

@@ -32,7 +32,10 @@ export default function MainApp() {
       ) : (
         <VideoPlayer 
           videoUrl={currentVideo.url} 
-          videoFile={currentVideo.file} 
+          videoFile={currentVideo.file}
+          isYouTube={currentVideo.isYouTube || false}
+          youtubeId={currentVideo.youtubeId || null}
+          videoTitle={currentVideo.name || "Video"}
         />
       )}
     </div>

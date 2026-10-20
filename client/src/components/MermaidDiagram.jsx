@@ -14,11 +14,21 @@ function sanitizeMermaid(code) {
   // Clean markdown backticks if any
   let clean = code.replace(/```mermaid/gi, '').replace(/```/g, '').trim();
 
-  // Wrap unquoted node labels inside [...] with double quotes to prevent syntax errors on parens, e.g. A[Label (info)] -> A["Label (info)"]
-  clean = clean.replace(/(\b\w+)\s*\[\s*(?!"|\s*")([^\]\n]+)\s*\]/g, (match, id, label) => {
-    // Escaping any internal double quotes inside label
-    const safeLabel = label.replace(/"/g, "'");
-    return `${id}["${safeLabel}"]`;
+  // 1. Unescape literal escaped newlines
+  clean = clean.replace(/\\n/g, '\n');
+
+  // 2. Normalize and quote all node labels cleanly
+  clean = clean.replace(/(\b\w+)\s*\[\s*(.+?)\s*\](?=\s*(-->|---|==>|-.->|\n|$))/g, (match, id, rawLabel) => {
+    let label = rawLabel.trim();
+    // Remove leading/trailing quotes or escaped quotes like \" or \' or ' or "
+    label = label.replace(/^(\\?['"])+/, '').replace(/(\\?['"])+$/, '');
+    // Remove backslashes
+    label = label.replace(/\\/g, '');
+    // Replace semicolons inside labels because mermaid treats ; as statement separator
+    label = label.replace(/;/g, ' -');
+    // Clean internal double quotes
+    label = label.replace(/"/g, "'");
+    return `${id}["${label}"]`;
   });
 
   return clean;

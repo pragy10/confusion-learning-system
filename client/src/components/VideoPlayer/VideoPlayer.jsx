@@ -21,9 +21,20 @@ import { transcribeVideo } from "../../services/transcriptService";
 import { getVideoFile } from "../../utils/videoFile";
 
 import MermaidDiagram from "../MermaidDiagram";
-import { FileText, Bookmark, MessageCircleQuestion, RefreshCw, LayoutList } from "lucide-react";
+import CustomNotes from "../Notes/CustomNotes";
+import SessionSummaryModal from "../SessionSummary/SessionSummaryModal";
+import { FileText, Bookmark, MessageCircleQuestion, RefreshCw, LayoutList, BarChart3, FileDown } from "lucide-react";
+import { exportNotesToPdf } from "../../utils/pdfExport";
+import { AI_SERVICE_URL, BACKEND_URL } from "../../config/api";
 
-function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
+function VideoPlayer({
+  videoUrl = "/videos/sample.mp4",
+  videoFile = null,
+  isYouTube = false,
+  youtubeId = null,
+  videoTitle = "",
+}) {
+  const ytPlayerRef = useRef(null);
   const videoRef = useRef(null);
 
   const confusionCooldownRef = useRef(0);
@@ -83,6 +94,23 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
 
   const [heatmapError, setHeatmapError] = useState(null);
 
+  const [showSessionSummary, setShowSessionSummary] = useState(false);
+  const videoStorageKey = `confusion_learning_notes_${videoFile?.name || videoUrl}`;
+  const [customNotes, setCustomNotes] = useState(() => {
+    try {
+      return localStorage.getItem(`confusion_learning_notes_${videoFile?.name || videoUrl}`) || "";
+    } catch {
+      return "";
+    }
+  });
+
+  // Listen for global "open-session-summary" event from top nav
+  useEffect(() => {
+    const handleOpenSummary = () => setShowSessionSummary(true);
+    window.addEventListener("open-session-summary", handleOpenSummary);
+    return () => window.removeEventListener("open-session-summary", handleOpenSummary);
+  }, []);
+
   const {
     events,
     recordPlay,
@@ -93,6 +121,167 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
     recordExplanationRequest,
     updateCurrentTime,
   } = useVideoTelemetry(sessionId);
+
+  /*
+   * Add a watched interval.
+   */
+  const addWatchedInterval = (start, end) => {
+    if (typeof start !== "number" || typeof end !== "number") {
+      return;
+    }
+
+    if (end <= start) {
+      return;
+    }
+
+    setWatchedIntervals((prev) => {
+      const intervals = [
+        ...prev,
+        { start, end },
+      ].sort((a, b) => a.start - b.start);
+
+      const merged = [];
+
+      for (const interval of intervals) {
+        const last = merged[merged.length - 1];
+
+        if (!last || interval.start > last.end) {
+          merged.push({ start: interval.start, end: interval.end });
+        } else {
+          last.end = Math.max(last.end, interval.end);
+        }
+      }
+
+      return merged;
+    });
+  };
+
+  // ── YOUTUBE IFRAME PLAYER API INTEGRATION ──
+  useEffect(() => {
+    if (!isYouTube || !youtubeId) return;
+
+    let player = null;
+
+    const initPlayer = () => {
+      if (!window.YT || !window.YT.Player) return;
+      try {
+        player = new window.YT.Player("yt-player-frame", {
+          videoId: youtubeId,
+          playerVars: {
+            autoplay: 0,
+            controls: 1,
+            modestbranding: 1,
+            rel: 0,
+          },
+          events: {
+            onReady: (event) => {
+              ytPlayerRef.current = event.target;
+              const dur = event.target.getDuration();
+              if (dur && Number.isFinite(dur)) {
+                setDuration(dur);
+              }
+            },
+            onStateChange: (event) => {
+              if (event.data === 1) {
+                // PLAYING
+                setIsPlaying(true);
+                const cur = event.target.getCurrentTime();
+                recordPlay(cur);
+              } else if (event.data === 2) {
+                // PAUSED
+                setIsPlaying(false);
+                const cur = event.target.getCurrentTime();
+                recordPause(cur);
+              }
+            },
+          },
+        });
+      } catch (err) {
+        console.warn("[YT_INIT_ERROR]", err);
+      }
+    };
+
+    if (!window.YT) {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      window.onYouTubeIframeAPIReady = initPlayer;
+      document.body.appendChild(tag);
+    } else {
+      initPlayer();
+    }
+
+    return () => {
+      if (player && typeof player.destroy === "function") {
+        try {
+          player.destroy();
+        } catch (e) {
+          console.warn("YT destroy error", e);
+        }
+      }
+    };
+  }, [isYouTube, youtubeId, recordPlay, recordPause]);
+
+  // YouTube playhead polling
+  useEffect(() => {
+    if (!isYouTube) return;
+    const interval = setInterval(() => {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === "function") {
+        const cur = ytPlayerRef.current.getCurrentTime();
+        if (Number.isFinite(cur)) {
+          setCurrentTime(cur);
+          updateCurrentTime(cur);
+          addWatchedInterval(Math.max(0, cur - 1), cur + 1);
+          const context = getTranscriptContext(transcript, cur);
+          setTranscriptContext(context);
+        }
+        const dur = ytPlayerRef.current.getDuration();
+        if (Number.isFinite(dur) && dur > 0 && dur !== duration) {
+          setDuration(dur);
+        }
+      }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [isYouTube, updateCurrentTime, transcript, duration]);
+
+
+  const handleAddToNotes = (text) => {
+    const formatTimestamp = (sec) => {
+      if (!Number.isFinite(sec)) return "[00:00]";
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `[${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}]`;
+    };
+    const prefix = `${formatTimestamp(currentTime)} `;
+    const newEntry = `${prefix}${text}`;
+    setCustomNotes((prev) => {
+      const updated = prev ? `${prev}\n\n${newEntry}` : newEntry;
+      try {
+        localStorage.setItem(videoStorageKey, updated);
+      } catch (err) {
+        console.warn("Storage save error", err);
+      }
+      return updated;
+    });
+  };
+
+  // Sync snapshot of session for global Session Summary access
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "last_learning_session",
+        JSON.stringify({
+          events,
+          duration,
+          currentTime,
+          savedExplanations,
+          customNotes,
+          videoTitle: videoFile?.name || "Sample Video",
+        })
+      );
+    } catch (err) {
+      console.warn("Session snapshot error", err);
+    }
+  }, [events, duration, currentTime, savedExplanations, customNotes, videoFile]);
 
   /*
    * Load and transcribe the video.
@@ -106,6 +295,22 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         setTranscriptError(null);
         setTranscriptStatus("transcribing");
 
+        // 1. YouTube direct transcript (bypass local Whisper)
+        if (isYouTube && youtubeId) {
+          const res = await fetch(`${AI_SERVICE_URL}/youtube/transcript?videoId=${youtubeId}`);
+          if (!res.ok) {
+            const errData = await res.json().catch(() => null);
+            throw new Error(errData?.detail || `YouTube transcript fetch failed (${res.status})`);
+          }
+          const data = await res.json();
+          if (!cancelled) {
+            setTranscript(data.segments || []);
+            setTranscriptStatus("ready");
+          }
+          return;
+        }
+
+        // 2. Local video Whisper transcription
         let fileToTranscribe;
         if (videoFile) {
           fileToTranscribe = videoFile;
@@ -138,7 +343,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
     return () => {
       cancelled = true;
     };
-  }, [videoUrl, videoFile]);
+  }, [videoUrl, videoFile, isYouTube, youtubeId]);
 
   /*
    * Load peer confusion heatmap.
@@ -152,7 +357,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         setHeatmapError(null);
 
         const response = await fetch(
-          `http://localhost:5000/api/events/heatmap?sessionId=${sessionId}`,
+          `${BACKEND_URL}/api/events/heatmap?sessionId=${sessionId}`,
         );
 
         if (!response.ok) {
@@ -227,7 +432,13 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
 
       if (e.code === "Space" || e.key === " ") {
         e.preventDefault();
-        if (videoRef.current) {
+        if (isYouTube && ytPlayerRef.current) {
+          if (isPlaying) {
+            if (typeof ytPlayerRef.current.pauseVideo === "function") ytPlayerRef.current.pauseVideo();
+          } else {
+            if (typeof ytPlayerRef.current.playVideo === "function") ytPlayerRef.current.playVideo();
+          }
+        } else if (videoRef.current) {
           if (videoRef.current.paused) {
             videoRef.current.play();
           } else {
@@ -236,7 +447,13 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         }
       } else if (e.key === "ArrowLeft" || e.key === "<") {
         e.preventDefault();
-        if (videoRef.current) {
+        if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+          const oldTime = currentTime;
+          const newTime = Math.max(0, oldTime - 10);
+          ytPlayerRef.current.seekTo(newTime, true);
+          setCurrentTime(newTime);
+          recordSeek(oldTime, newTime);
+        } else if (videoRef.current) {
           const oldTime = videoRef.current.currentTime;
           const newTime = Math.max(0, oldTime - 10);
           videoRef.current.currentTime = newTime;
@@ -245,7 +462,13 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         }
       } else if (e.key === "ArrowRight" || e.key === ">") {
         e.preventDefault();
-        if (videoRef.current) {
+        if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+          const oldTime = currentTime;
+          const newTime = Math.min(duration || 0, oldTime + 10);
+          ytPlayerRef.current.seekTo(newTime, true);
+          setCurrentTime(newTime);
+          recordSeek(oldTime, newTime);
+        } else if (videoRef.current) {
           const oldTime = videoRef.current.currentTime;
           const newTime = Math.min(videoRef.current.duration || 0, oldTime + 10);
           videoRef.current.currentTime = newTime;
@@ -257,41 +480,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [recordSeek]);
-
-  /*
-   * Add a watched interval.
-   */
-  const addWatchedInterval = (start, end) => {
-    if (typeof start !== "number" || typeof end !== "number") {
-      return;
-    }
-
-    if (end <= start) {
-      return;
-    }
-
-    setWatchedIntervals((prev) => {
-      const intervals = [
-        ...prev,
-        { start, end },
-      ].sort((a, b) => a.start - b.start);
-
-      const merged = [];
-
-      for (const interval of intervals) {
-        const last = merged[merged.length - 1];
-
-        if (!last || interval.start > last.end) {
-          merged.push({ start: interval.start, end: interval.end });
-        } else {
-          last.end = Math.max(last.end, interval.end);
-        }
-      }
-
-      return merged;
-    });
-  };
+  }, [recordSeek, isYouTube, isPlaying, currentTime, duration]);
 
   /*
    * Check whether a heatmap bucket has already been watched.
@@ -359,17 +548,35 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
   };
 
   const handleSeek = (newTime) => {
-    if (!videoRef?.current) {
-      return;
+    if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
+      const oldTime = currentTime;
+      ytPlayerRef.current.seekTo(newTime, true);
+      setCurrentTime(newTime);
+      recordSeek(oldTime, newTime);
+      const context = getTranscriptContext(transcript, newTime);
+      setTranscriptContext(context);
+    } else if (videoRef?.current) {
+      const oldTime = videoRef.current.currentTime;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      recordSeek(oldTime, newTime);
     }
+  };
 
-    const oldTime = videoRef.current.currentTime;
-
-    videoRef.current.currentTime = newTime;
-
-    setCurrentTime(newTime);
-
-    recordSeek(oldTime, newTime);
+  const handlePlayPause = () => {
+    if (isYouTube && ytPlayerRef.current) {
+      if (isPlaying) {
+        if (typeof ytPlayerRef.current.pauseVideo === "function") ytPlayerRef.current.pauseVideo();
+      } else {
+        if (typeof ytPlayerRef.current.playVideo === "function") ytPlayerRef.current.playVideo();
+      }
+    } else if (videoRef?.current) {
+      if (videoRef.current.paused) {
+        videoRef.current.play();
+      } else {
+        videoRef.current.pause();
+      }
+    }
   };
 
   const handleConfusionSelect = (confusionType) => {
@@ -389,15 +596,14 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
   };
 
   const handlePlaybackRateChange = (rate) => {
-    if (!videoRef?.current) {
-      return;
-    }
-
-    videoRef.current.playbackRate = rate;
-
     setPlaybackRate(rate);
-
-    recordSpeedChange(videoRef.current.currentTime, rate);
+    if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackRate === "function") {
+      ytPlayerRef.current.setPlaybackRate(rate);
+      recordSpeedChange(currentTime, rate);
+    } else if (videoRef?.current) {
+      videoRef.current.playbackRate = rate;
+      recordSpeedChange(videoRef.current.currentTime, rate);
+    }
   };
 
   const handleExplain = async () => {
@@ -499,7 +705,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
     try {
       setNotesLoading(true);
       setNotesError(null);
-      const response = await fetch("http://localhost:8000/notes", {
+      const response = await fetch(`${AI_SERVICE_URL}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript }),
@@ -547,7 +753,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
           {transcriptStatus === "ready" && (
             <div className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-300">
               <span className="h-2 w-2 rounded-full bg-green-400" />
-              <span>Transcript Ready & Synced ✓</span>
+              <span>{isYouTube ? `YouTube Transcript Synced (${transcript.length} segments) ✓` : "Transcript Ready & Synced ✓"}</span>
             </div>
           )}
           {transcriptStatus === "error" && (
@@ -558,12 +764,23 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
           )}
         </div>
 
-        {/* Shortcuts Legend */}
-        <div className="hidden sm:flex items-center gap-3 text-[11px] text-slate-400">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowSessionSummary(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition"
+            title="View learning session analytics and retention summary"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-slate-400" />
+            <span>Session Summary</span>
+          </button>
+
+          {/* Shortcuts Legend */}
+          <div className="hidden sm:flex items-center gap-3 text-[11px] text-slate-400">
           <span>Shortcuts:</span>
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-slate-300 border border-slate-700">Space</span> Play/Pause
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-slate-300 border border-slate-700">← / &lt;</span> -10s
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-slate-300 border border-slate-700">→ / &gt;</span> +10s
+        </div>
         </div>
       </div>
 
@@ -574,20 +791,28 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
 
           {/* Video container */}
           <div className="relative overflow-hidden rounded-xl border border-slate-800/60 bg-black overflow-hidden">
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              className="aspect-video w-full bg-black cursor-pointer"
-              onLoadedMetadata={handleLoadedMetadata}
-              onTimeUpdate={handleTimeUpdate}
-              onPlay={handlePlay}
-              onPause={handlePause}
-              onClick={handleVideoClick}
-            />
+            {isYouTube ? (
+              <div className="aspect-video w-full bg-black flex items-center justify-center">
+                <div id="yt-player-frame" className="w-full h-full" />
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                className="aspect-video w-full bg-black cursor-pointer"
+                onLoadedMetadata={handleLoadedMetadata}
+                onTimeUpdate={handleTimeUpdate}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                onClick={handleVideoClick}
+              />
+            )}
 
             <button
               onClick={() => {
-                if (videoRef.current && !videoRef.current.paused) {
+                if (isYouTube && ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
+                  ytPlayerRef.current.pauseVideo();
+                } else if (videoRef.current && !videoRef.current.paused) {
                   videoRef.current.pause();
                 }
                 setShowRadialMenu(true);
@@ -627,14 +852,7 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
               isPlaying={isPlaying}
               playbackRate={playbackRate}
               heatmapData={visibleHeatmapData}
-              onPlayPause={() => {
-                if (!videoRef?.current) return;
-                if (videoRef.current.paused) {
-                  videoRef.current.play();
-                } else {
-                  videoRef.current.pause();
-                }
-              }}
+              onPlayPause={handlePlayPause}
               onSeek={handleSeek}
               onSpeedChange={handlePlaybackRateChange}
             />
@@ -647,13 +865,31 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
                 <FileText className="w-5 h-5 text-slate-400" />
                 <h2 className="text-base font-bold text-white">Instant Video Notes</h2>
               </div>
-              <button
-                onClick={handleGenerateNotes}
-                disabled={notesLoading || transcriptLoading}
-                className="rounded-lg bg-white px-4 py-2 text-xs font-medium text-black hover:bg-slate-200 disabled:opacity-50 transition"
-              >
-                {notesLoading ? "Generating Notes..." : notesData ? "Regenerate Notes" : "Generate Instant Notes"}
-              </button>
+              <div className="flex items-center gap-2">
+                {notesData && (
+                  <button
+                    onClick={() =>
+                      exportNotesToPdf({
+                        videoTitle: videoTitle || videoFile?.name || (isYouTube ? `YouTube ${youtubeId}` : "Video Notes"),
+                        summary: notesData.summary,
+                        notes: notesData.notes,
+                      })
+                    }
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                    title="Export notes and summary as PDF"
+                  >
+                    <FileDown className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Export PDF</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleGenerateNotes}
+                  disabled={notesLoading || transcriptLoading}
+                  className="rounded-lg bg-white px-4 py-2 text-xs font-medium text-black hover:bg-slate-200 disabled:opacity-50 transition"
+                >
+                  {notesLoading ? "Generating Notes..." : notesData ? "Regenerate Notes" : "Generate Instant Notes"}
+                </button>
+              </div>
             </div>
 
             {notesError && <p className="mb-3 text-sm text-red-400">{notesError}</p>}
@@ -786,7 +1022,16 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         </div>
 
         {/* ── RIGHT COLUMN: Right Navigation Panel ── */}
-        <div className="flex flex-col">
+        <div className="flex flex-col space-y-4">
+          {/* Custom Note Taking - above explanations card */}
+          <CustomNotes
+            notes={customNotes}
+            onChange={setCustomNotes}
+            currentTime={currentTime}
+            onSeek={handleSeek}
+            videoKey={videoFile?.name || videoUrl}
+          />
+
           <div className="sticky top-4 z-20 rounded-xl border border-slate-800/60 bg-[#111] overflow-hidden">
             
             {/* Navigation Bar */}
@@ -850,12 +1095,14 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
                   {explanationResult && (
                     <Explanation
                       result={explanationResult}
+                      transcriptContext={transcriptContext?.current?.text || ""}
                       onClose={() => setExplanationResult(null)}
                       onSave={(result) => {
                         setSavedExplanations((prev) => [...prev, result]);
                         setExplanationResult(null);
                         setActiveTab("saved");
                       }}
+                      onAddToNotes={handleAddToNotes}
                     />
                   )}
                 </div>
@@ -962,6 +1209,19 @@ function VideoPlayer({ videoUrl = "/videos/sample.mp4", videoFile = null }) {
         </div>
 
       </div>
+
+      {/* Session Summary Screen Modal */}
+      <SessionSummaryModal
+        isOpen={showSessionSummary}
+        onClose={() => setShowSessionSummary(false)}
+        events={events}
+        duration={duration}
+        currentTime={currentTime}
+        savedExplanations={savedExplanations}
+        customNotes={customNotes}
+        videoTitle={videoFile?.name || "Sample Video"}
+        onSeek={handleSeek}
+      />
     </div>
   );
 }

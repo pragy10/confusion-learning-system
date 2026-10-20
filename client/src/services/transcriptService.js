@@ -1,4 +1,4 @@
-const AI_SERVICE_URL = "http://localhost:8000";
+import { AI_SERVICE_URL } from "../config/api";
 
 export async function transcribeVideo(videoFile) {
   const formData = new FormData();
