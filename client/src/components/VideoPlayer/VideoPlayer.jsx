@@ -27,6 +27,13 @@ import { FileText, Bookmark, MessageCircleQuestion, RefreshCw, LayoutList, BarCh
 import { exportNotesToPdf } from "../../utils/pdfExport";
 import { AI_SERVICE_URL, BACKEND_URL } from "../../config/api";
 
+function formatSeconds(sec) {
+  if (!Number.isFinite(sec)) return "00:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function VideoPlayer({
   videoUrl = "/videos/sample.mp4",
   videoFile = null,
@@ -172,6 +179,8 @@ function VideoPlayer({
             controls: 1,
             modestbranding: 1,
             rel: 0,
+            origin: typeof window !== "undefined" ? window.location.origin : undefined,
+            enablejsapi: 1,
           },
           events: {
             onReady: (event) => {
@@ -1112,45 +1121,44 @@ function VideoPlayer({
               {activeTab === "transcript" && (
                 <div>
                   <div className="mb-3 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-white">Live Transcript</h2>
-                    <span className="text-xs text-slate-500">{currentTime.toFixed(1)}s</span>
+                    <h2 className="text-sm font-semibold text-white">Video Transcript</h2>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {transcript ? `${transcript.length} segments` : "0 segments"}
+                    </span>
                   </div>
 
                   {transcriptLoading ? (
-                    <p className="text-sm text-slate-400">Transcribing video with Whisper...</p>
+                    <div className="py-8 text-center text-sm text-slate-400">
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-slate-500" />
+                      Loading and synchronizing transcript...
+                    </div>
                   ) : transcriptError ? (
                     <p className="text-sm text-red-400">Transcript error: {transcriptError}</p>
-                  ) : transcriptContext?.current ? (
-                    <div className="space-y-3">
-                      {transcriptContext.previous.length > 0 && (
-                        <div className="space-y-1.5">
-                          {transcriptContext.previous.map((seg) => (
-                            <p key={seg.id} className="rounded-lg bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
-                              {seg.text}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="rounded-xl border border-slate-700 bg-slate-800/40 px-4 py-3">
-                        <p className="text-sm leading-relaxed font-medium text-white">{transcriptContext.current.text}</p>
-                        <p className="mt-2 text-[10px] font-mono text-slate-300">
-                          {transcriptContext.current.start.toFixed(1)}s – {transcriptContext.current.end.toFixed(1)}s
-                        </p>
-                      </div>
-
-                      {transcriptContext.next.length > 0 && (
-                        <div className="space-y-1.5">
-                          {transcriptContext.next.map((seg) => (
-                            <p key={seg.id} className="rounded-lg bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
-                              {seg.text}
-                            </p>
-                          ))}
-                        </div>
-                      )}
+                  ) : transcript && transcript.length > 0 ? (
+                    <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+                      {transcript.map((seg) => {
+                        const isCurrent = currentTime >= seg.start && currentTime < seg.end;
+                        return (
+                          <div
+                            key={seg.id}
+                            onClick={() => handleSeek(seg.start)}
+                            className={`cursor-pointer rounded-lg p-2.5 transition text-xs ${
+                              isCurrent
+                                ? "border border-slate-600 bg-slate-800 text-white font-medium shadow-sm ring-1 ring-slate-500/30"
+                                : "hover:bg-slate-800/60 text-slate-300 bg-[#0a0a0a]/60 border border-slate-800/40"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mb-1">
+                              <span className="text-slate-400">{formatSeconds(seg.start)} - {formatSeconds(seg.end)}</span>
+                              {isCurrent && <span className="text-emerald-400 font-sans font-semibold">● Now playing</span>}
+                            </div>
+                            <p className="leading-relaxed">{seg.text}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-500">No transcript available for this timestamp.</p>
+                    <p className="text-sm text-slate-500">No transcript available for this video.</p>
                   )}
                 </div>
               )}

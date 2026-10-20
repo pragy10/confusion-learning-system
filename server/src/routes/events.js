@@ -1,8 +1,11 @@
 const express = require("express");
 
+const mongoose = require("mongoose");
 const Event = require("../models/Event");
 
 const router = express.Router();
+
+const inMemoryEvents = [];
 
 
 /*
@@ -38,6 +41,31 @@ router.post("/", async (req, res) => {
       });
     }
 
+    if (mongoose.connection.readyState !== 1) {
+      const memoryEvent = {
+        _id: String(Date.now() + Math.random()),
+        sessionId,
+        type,
+        videoTime,
+        confusionType,
+        reason,
+        from,
+        to,
+        distance,
+        previousRate,
+        newRate,
+        depth,
+        explanation,
+        visualType,
+        visualTitle,
+        keyPoint,
+        metadata,
+        clientTimestamp: timestamp || new Date().toISOString()
+      };
+      inMemoryEvents.push(memoryEvent);
+      if (inMemoryEvents.length > 500) inMemoryEvents.shift();
+      return res.status(201).json({ success: true, event: memoryEvent, storage: "in_memory" });
+    }
 
     const event = await Event.create({
       sessionId,
@@ -209,12 +237,14 @@ router.get(
       }
 
 
-      const events =
-        await Event.find(filter)
-          .select(
-            "sessionId videoTime confusionType"
-          )
+      let events = [];
+      if (mongoose.connection.readyState === 1) {
+        events = await Event.find(filter)
+          .select("sessionId videoTime confusionType")
           .lean();
+      } else {
+        events = inMemoryEvents.filter(e => e.confusionType && (!sessionId || e.sessionId !== sessionId));
+      }
 
 
       /*
